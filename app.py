@@ -660,8 +660,13 @@ def _opportunity_score(cluster_size: int, avg_rating: float, unique_users_proxy:
 
 def _cluster_negative_reviews(df: pd.DataFrame) -> Tuple[pd.DataFrame, np.ndarray, Optional[KMeans]]:
     neg = df[df["rating"] <= 3].copy()
-    neg["clean_text"] = neg["review_text"].map(_clean_text)
-    neg = neg[neg["clean_text"].str.len() >= 8].copy()
+
+# limit dataset for render free server
+if len(neg) > 200:
+    neg = neg.sample(200, random_state=42)
+
+neg["clean_text"] = neg["review_text"].map(_clean_text)
+neg = neg[neg["clean_text"].str.len() >= 8].copy()
     if neg.empty:
         return neg, np.array([]), None
 
@@ -902,6 +907,10 @@ def analyze():
 
     try:
         df = pd.read_csv(file)
+
+# limit dataset for cloud deployment
+if len(df) > 500:
+    df = df.sample(500, random_state=42)
     except Exception:
         return render_template("index.html", opportunities=None, upload_id=None, error="Could not read the CSV file."), 400
 
