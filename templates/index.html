@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Insight-to-Innovation Engine</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  </head>
+  <body>
+    <div class="page">
+      <header class="header">
+        <div class="brand">
+          <div class="brand-title">Insight-to-Innovation Engine</div>
+          <div class="brand-subtitle">Convert consumer complaints into product opportunities and strategic marketing blueprints.</div>
+        </div>
+        <div class="workflow" aria-label="workflow">
+          <span class="workflow-step">Upload</span>
+          <span class="workflow-arrow">→</span>
+          <span class="workflow-step">Analyze</span>
+          <span class="workflow-arrow">→</span>
+          <span class="workflow-step">Rank</span>
+          <span class="workflow-arrow">→</span>
+          <span class="workflow-step">Activate Strategy</span>
+        </div>
+      </header>
+
+      <section class="panel">
+        <form class="upload" action="{{ url_for('analyze') }}" method="post" enctype="multipart/form-data">
+          <div class="upload-left">
+            <div class="label">Upload CSV (required columns: <code>rating</code>, <code>review_text</code>)</div>
+            <div class="hint">Optional: <code>product_name</code>, <code>brand_name</code>, <code>category</code></div>
+          </div>
+          <div class="upload-right">
+            <input class="file" type="file" name="file" accept=".csv,text/csv" required />
+            <button class="btn btn-primary" type="submit">Analyze Reviews</button>
+          </div>
+        </form>
+
+        <div class="guidelines">
+          <div class="guidelines-title">Data Requirements</div>
+          <div class="guidelines-text">Upload a CSV file containing consumer review data.</div>
+
+          <div class="guidelines-title" style="margin-top: 10px;">Formatting Guidelines</div>
+          <ul class="guidelines-list">
+            <li>File must be CSV (comma separated)</li>
+            <li>Headers must be included in the first row</li>
+            <li>Text must be UTF-8 encoded</li>
+            <li>Rating must be numeric (1–5 scale)</li>
+            <li><b>Required columns</b>: <code>rating</code>, <code>review_text</code></li>
+            <li><b>Optional columns</b>: <code>product_name</code>, <code>brand_name</code>, <code>category</code></li>
+            <li><b>Recommended</b>: Dataset should contain at least 100+ reviews for meaningful clustering.</li>
+          </ul>
+        </div>
+
+        {% if error %}
+          <div class="alert" role="alert">{{ error }}</div>
+        {% endif %}
+
+        {% if opportunities %}
+          <div class="results-head">
+            <div class="results-title">Top 5 Innovation Opportunities</div>
+            <form action="{{ url_for('reset') }}" method="post">
+              <button class="btn btn-ghost" type="submit">Reset</button>
+            </form>
+          </div>
+          <div class="cards">
+            {% for opp in opportunities %}
+              <article class="card" data-opp-id="{{ opp.opp_id }}" data-upload-id="{{ upload_id }}">
+                <div class="card-title">{{ opp.product_name }}</div>
+
+                <div class="grid">
+                  <div class="field">
+                    <div class="k">Product Concept</div>
+                    <div class="v">{{ opp.product_concept }}</div>
+                  </div>
+                  <div class="field">
+                    <div class="k">Target Persona</div>
+                    <div class="v">{{ opp.target_persona }}</div>
+                  </div>
+                  <div class="field">
+                    <div class="k">Core Problem</div>
+                    <div class="v">{{ opp.core_problem }}</div>
+                  </div>
+                  <div class="field">
+                    <div class="k">Formulation Direction</div>
+                    <div class="v">{{ opp.formulation_direction }}</div>
+                  </div>
+                  <div class="field">
+                    <div class="k">Product Format</div>
+                    <div class="v">{{ opp.product_format }}</div>
+                  </div>
+                  <div class="field">
+                    <div class="k">Suggested Price Band</div>
+                    <div class="v">{{ opp.suggested_price_band }}</div>
+                  </div>
+                  <div class="field">
+                    <div class="k">Key Differentiation</div>
+                    <div class="v">{{ opp.key_differentiation }}</div>
+                  </div>
+                  <div class="field">
+                    <div class="k">Why Competitors Fail</div>
+                    <div class="v">{{ opp.why_competitors_fail }}</div>
+                  </div>
+                </div>
+
+                <div class="meta">
+                  <div class="badge">Evidence: {{ opp.evidence_count }} negative reviews</div>
+                  <div class="badge">Opportunity Score: {{ opp.opportunity_score }} / 20</div>
+                </div>
+
+                {% if opp.sample_quotes and opp.sample_quotes|length > 0 %}
+                  <div class="quotes">
+                    <div class="k">Representative Review Snippets (for context)</div>
+                    <ul class="quote-list">
+                      {% for q in opp.sample_quotes %}
+                        <li class="quote">“{{ q }}”</li>
+                      {% endfor %}
+                    </ul>
+                  </div>
+                {% endif %}
+
+                <div class="actions">
+                  <button class="btn btn-secondary plan-btn" type="button">Generate Strategic Activation Plan</button>
+                </div>
+
+                <div class="plan" hidden>
+                  <div class="plan-title">Strategic Activation Plan</div>
+                  <div class="plan-body" aria-live="polite"></div>
+                </div>
+              </article>
+            {% endfor %}
+          </div>
+        {% else %}
+          <div class="empty">
+            <div class="empty-title">Upload a review dataset to begin.</div>
+            <div class="empty-subtitle">
+              The engine will filter negative reviews (rating ≤ 3), detect recurring complaint patterns, rank them, and produce exactly 5 product opportunities.
+            </div>
+          </div>
+        {% endif %}
+      </section>
+
+      <footer class="footer">
+        <div>Designed for product teams: concise briefs, no cluster keywords, strategy on-demand.</div>
+      </footer>
+    </div>
+
+    <script>
+      function escapeHtml(s) {
+        return String(s)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+
+      function renderPlan(plan) {
+        const order = [
+          "Opportunity Score (X / 20)",
+          "Why This Opportunity Could Win in India",
+          "Executive Insight",
+          "Positioning Statement",
+          "90-Day Go-To-Market Roadmap",
+          "Messaging Architecture",
+          "Launch Campaign Concept",
+          "KPI Framework",
+          "Risk Factors & Mitigation Strategy",
+          "Strategic Confidence Level",
+        ];
+
+        let html = "";
+        for (const section of order) {
+          const v = plan[section];
+          if (v === undefined) continue;
+          html += `<div class="plan-section"><div class="plan-h">${escapeHtml(section)}</div>`;
+
+          if (section === "90-Day Go-To-Market Roadmap" && Array.isArray(v)) {
+            html += `<div class="roadmap">`;
+            for (const row of v) {
+              html += `<div class="roadmap-phase">${escapeHtml(row.phase)}</div>`;
+              html += `<div class="roadmap-line">${escapeHtml(row.plan)}</div>`;
+            }
+            html += `</div>`;
+          } else if (section === "Messaging Architecture" && v && typeof v === "object") {
+            html += `<div class="msg">`;
+            html += `<div class="msg-sub">Pillars</div>`;
+            html += `<ul class="msg-list">`;
+            for (const p of (v["Pillars"] || [])) html += `<li>${escapeHtml(p)}</li>`;
+            html += `</ul>`;
+            html += `<div class="msg-sub">Example Headlines</div>`;
+            html += `<ul class="msg-list">`;
+            for (const h of (v["Example Headlines"] || [])) html += `<li>“${escapeHtml(h)}”</li>`;
+            html += `</ul>`;
+            html += `</div>`;
+          } else if (section === "KPI Framework" && Array.isArray(v)) {
+            html += `<ul class="kpi">`;
+            for (const k of v) html += `<li>${escapeHtml(k)}</li>`;
+            html += `</ul>`;
+          } else if (section === "Risk Factors & Mitigation Strategy" && Array.isArray(v)) {
+            html += `<div class="risk">`;
+            for (const row of v) {
+              html += `<div class="risk-row"><div class="risk-k">${escapeHtml(row.Risk)}</div><div class="risk-v">${escapeHtml(row.Mitigation)}</div></div>`;
+            }
+            html += `</div>`;
+          } else {
+            html += `<div class="plan-v">${escapeHtml(v)}</div>`;
+          }
+
+          html += `</div>`;
+        }
+        return html;
+      }
+
+      async function onPlanClick(card, btn) {
+        const uploadId = card.getAttribute("data-upload-id");
+        const oppId = card.getAttribute("data-opp-id");
+        const planEl = card.querySelector(".plan");
+        const bodyEl = card.querySelector(".plan-body");
+
+        if (!planEl.hasAttribute("hidden")) {
+          planEl.setAttribute("hidden", "");
+          btn.textContent = "Generate Strategic Activation Plan";
+          return;
+        }
+
+        btn.disabled = true;
+        btn.textContent = "Generating…";
+        try {
+          const res = await fetch(`/plan/${encodeURIComponent(uploadId)}/${encodeURIComponent(oppId)}`);
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || "Failed to generate plan.");
+          bodyEl.innerHTML = renderPlan(data);
+          planEl.removeAttribute("hidden");
+          btn.textContent = "Hide Strategic Activation Plan";
+        } catch (e) {
+          bodyEl.innerHTML = `<div class="alert">${escapeHtml(e.message || String(e))}</div>`;
+          planEl.removeAttribute("hidden");
+          btn.textContent = "Hide Strategic Activation Plan";
+        } finally {
+          btn.disabled = false;
+        }
+      }
+
+      document.addEventListener("click", (e) => {
+        const btn = e.target.closest(".plan-btn");
+        if (!btn) return;
+        const card = btn.closest(".card");
+        if (!card) return;
+        onPlanClick(card, btn);
+      });
+    </script>
+  </body>
+</html>
+
