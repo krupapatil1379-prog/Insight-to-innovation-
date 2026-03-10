@@ -1,236 +1,165 @@
-import re
 import uuid
-from dataclasses import asdict, dataclass
-from typing import Dict, List, Optional, Tuple
-
-import numpy as np
 import pandas as pd
-from flask import Flask, jsonify, redirect, render_template, request, url_for
-from sklearn.cluster import KMeans
+import numpy as np
+
+from flask import Flask, render_template, request, jsonify
 from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.cluster import KMeans
+
 
 app = Flask(__name__)
-app.secret_key = "insight-to-innovation-engine-dev"
 
-REQUIRED_COLUMNS = {"rating", "review_text"}
-
-UPLOAD_STORE: Dict[str, List["Opportunity"]] = {}
+UPLOAD_STORE = {}
 
 
-@dataclass
-class Opportunity:
-    opp_id: str
-    theme: str
-    category_hint: str
-    product_name: str
-    product_concept: str
-    target_persona: str
-    core_problem: str
-    formulation_direction: str
-    product_format: str
-    suggested_price_band: str
-    key_differentiation: str
-    why_competitors_fail: str
-    opportunity_score: int
-    evidence_count: int
-    sample_quotes: List[str]
+# ---------- CLEAN TEXT ----------
+def clean_text(text):
+    text = str(text).lower()
+    return text
 
 
-def _safe_str(x):
-    if x is None:
-        return ""
-    return str(x)
+# ---------- CLUSTER REVIEWS ----------
+def generate_opportunities(df):
 
-
-def _clean_text(text: str):
-    text = _safe_str(text).lower()
-    text = re.sub(r"http\S+|www\S+", " ", text)
-    text = re.sub(r"[^a-z0-9\s']", " ", text)
-    text = re.sub(r"\s+", " ", text)
-    return text.strip()
-
-
-def _sample_quotes(texts: List[str], k=2):
-    out = []
-    for t in texts[:10]:
-        s = _safe_str(t).strip()
-        if len(s) > 140:
-            s = s[:140] + "..."
-        out.append(s)
-        if len(out) >= k:
-            break
-    return out
-
-
-def _cluster_negative_reviews(df: pd.DataFrame):
     neg = df[df["rating"] <= 3].copy()
 
-    if len(neg) > 200:
-        neg = neg.sample(200, random_state=42)
+    if len(neg) == 0:
+        return []
 
-    neg["clean_text"] = neg["review_text"].map(_clean_text)
-    neg = neg[neg["clean_text"].str.len() >= 8]
+    texts = neg["review_text"].astype(str).tolist()
 
-    if neg.empty:
-        return neg, np.array([]), None
+    vectorizer = TfidfVectorizer(stop_words="english")
 
-    docs = neg["clean_text"].tolist()
+    X = vectorizer.fit_transform(texts)
 
-    vectorizer = TfidfVectorizer(
-        stop_words="english",
-        ngram_range=(1, 2),
-        max_features=6000,
-        min_df=(2 if len(docs) >= 30 else 1),
-    )
+    k = min(5, max(2, int(np.sqrt(len(texts)))))
 
-    X = vectorizer.fit_transform(docs)
+    model = KMeans(n_clusters=k, random_state=42)
 
-    k = int(np.clip(round(np.sqrt(max(2, len(docs) / 2))), 2, 8))
-    if len(docs) < 10:
-        k = 2
-    if len(docs) < 4:
-        k = 1
-
-    model = KMeans(n_clusters=k, n_init=10, random_state=42)
     labels = model.fit_predict(X)
 
     neg["cluster"] = labels
-    return neg, labels, model
-
-
-def _generate_opportunities(df: pd.DataFrame):
-
-    neg, labels, _ = _cluster_negative_reviews(df)
-
-    if neg.empty:
-        return []
 
     groups = neg.groupby("cluster")
-    opps = []
 
-    for idx, (cl, g) in enumerate(groups, start=1):
+    opportunities = []
 
-        texts = g["review_text"].tolist()
+    for i, (cl, g) in enumerate(groups):
 
-        opps.append(
-            Opportunity(
-                opp_id=str(uuid.uuid4()),
-                theme="Customer Pain Point",
-                category_hint="General",
-                product_name=f"Innovation Concept {idx}",
-                product_concept="Concept derived from negative review clustering.",
-                target_persona="Dissatisfied users seeking better alternatives",
-                core_problem="Users report dissatisfaction in product performance",
-                formulation_direction="Improve reliability and performance",
-                product_format="Standard product format",
-                suggested_price_band="₹299 – ₹799",
-                key_differentiation="Focused on solving top complaint cluster",
-                why_competitors_fail="Competitors ignore recurring pain points",
-                opportunity_score=min(20, int(len(g) / len(neg) * 20)),
-                evidence_count=len(g),
-                sample_quotes=_sample_quotes(texts),
-            )
-        )
+        opportunities.append({
+            "opp_id": str(uuid.uuid4()),
+            "theme": "Customer Pain Point",
+            "product_name": f"Innovation Idea {i+1}",
+            "core_problem": "Users report dissatisfaction in reviews",
+            "opportunity_score": int(len(g) / len(neg) * 20),
+            "evidence_count": len(g),
+            "sample_quotes": g["review_text"].head(2).tolist()
+        })
 
-    return opps[:5]
+    return opportunities[:5]
 
 
-@app.get("/")
+# ---------- HOME ----------
+@app.route("/")
 def index():
-    return render_template("index.html", opportunities=None, upload_id=None, error=None)
+
+    return render_template(
+        "index.html",
+        opportunities=None,
+        upload_id=None,
+        error=None
+    )
 
 
-@app.post("/analyze")
+# ---------- ANALYZE ----------
+@app.route("/analyze", methods=["POST"])
 def analyze():
 
     file = request.files.get("file")
 
-    if not file or not file.filename:
+    if not file:
         return render_template(
             "index.html",
             opportunities=None,
             upload_id=None,
-            error="Please upload a CSV file."
-        ), 400
-
-    try:
-        df = pd.read_csv(file)
-
-        # limit dataset for cloud deployment
-        if len(df) > 500:
-            df = df.sample(500, random_state=42)
-
-    except Exception:
-        return render_template(
-            "index.html",
-            opportunities=None,
-            upload_id=None,
-            error="Could not read the CSV file."
-        ), 400
-
-    cols = set([c.strip() for c in df.columns])
-    missing = REQUIRED_COLUMNS - cols
-
-    if missing:
-        return (
-            render_template(
-                "index.html",
-                opportunities=None,
-                upload_id=None,
-                error=f"Missing required columns: {', '.join(sorted(missing))}",
-            ),
-            400,
+            error="Upload a CSV file."
         )
 
-    df = df.rename(columns={c: c.strip() for c in df.columns})
-    df["rating"] = pd.to_numeric(df["rating"], errors="coerce")
-    df["review_text"] = df["review_text"].map(_safe_str)
+    try:
 
-    df = df.dropna(subset=["rating", "review_text"])
-    df = df[df["review_text"].str.strip().astype(bool)]
+        file.seek(0)
 
-    if df.empty:
+        df = pd.read_csv(file)
+
+    except Exception:
+
         return render_template(
             "index.html",
             opportunities=None,
             upload_id=None,
-            error="CSV contains no usable rows."
-        ), 400
+            error="Could not read CSV."
+        )
 
-    opportunities = _generate_opportunities(df)
+    df.columns = df.columns.str.strip().str.lower()
+
+    if "rating" not in df.columns or "review_text" not in df.columns:
+
+        return render_template(
+            "index.html",
+            opportunities=None,
+            upload_id=None,
+            error="CSV must contain rating and review_text columns."
+        )
+
+    df["rating"] = pd.to_numeric(df["rating"], errors="coerce")
+
+    df["review_text"] = df["review_text"].astype(str)
+
+    df = df.dropna(subset=["rating", "review_text"])
+
+    if len(df) == 0:
+
+        return render_template(
+            "index.html",
+            opportunities=None,
+            upload_id=None,
+            error="No usable rows in CSV."
+        )
+
+    if len(df) > 200:
+        df = df.head(200)
+
+    opportunities = generate_opportunities(df)
 
     upload_id = str(uuid.uuid4())
+
     UPLOAD_STORE[upload_id] = opportunities
 
     return render_template(
         "index.html",
-        opportunities=[asdict(o) for o in opportunities],
+        opportunities=opportunities,
         upload_id=upload_id,
-        error=None,
+        error=None
     )
 
 
-@app.get("/plan/<upload_id>/<opp_id>")
-def plan(upload_id: str, opp_id: str):
+# ---------- PLAN ----------
+@app.route("/plan/<upload_id>/<opp_id>")
+def plan(upload_id, opp_id):
 
     opps = UPLOAD_STORE.get(upload_id)
 
     if not opps:
-        return jsonify({"error": "Upload not found. Please re-upload the CSV."}), 404
+        return jsonify({"error": "Upload not found"}), 404
 
-    match = next((o for o in opps if o.opp_id == opp_id), None)
+    match = next((o for o in opps if o["opp_id"] == opp_id), None)
 
     if not match:
-        return jsonify({"error": "Opportunity not found."}), 404
+        return jsonify({"error": "Opportunity not found"}), 404
 
-    return jsonify(asdict(match))
-
-
-@app.post("/reset")
-def reset():
-    UPLOAD_STORE.clear()
-    return redirect(url_for("index"))
+    return jsonify(match)
 
 
+# ---------- RUN ----------
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(host="0.0.0.0", port=8080)
